@@ -297,27 +297,42 @@ const onKeySave = (e: KeyboardEvent) => {
 
 const loadChapter = async () => {
   const cid = chapterId.value
-  const desk = await bookApi.getDesk(slug)
-  chapterIds.value = desk.chapters.map(c => c.id).sort((a, b) => a - b)
 
-  const body = await bookApi.getChapterBody(slug, cid)
-  content.value = body.content || ''
-  if (content.value) {
-    createTime.value = new Date().toLocaleString('zh-CN', { hour12: false })
-    updateTime.value = createTime.value
+  // Parallel execution of independent API calls
+  const [desk, body, rev, structureResult] = await Promise.allSettled([
+    bookApi.getDesk(slug),
+    bookApi.getChapterBody(slug, cid),
+    bookApi.getChapterReview(slug, cid),
+    bookApi.getChapterStructure(slug, cid)
+  ])
+
+  // Handle desk API result
+  if (desk.status === 'fulfilled') {
+    chapterIds.value = desk.value.chapters.map(c => c.id).sort((a, b) => a - b)
   }
 
-  const rev = await bookApi.getChapterReview(slug, cid)
-  reviewStatus.value = rev.status
-  reviewMemo.value = rev.memo
-
-  try {
-    const st = await bookApi.getChapterStructure(slug, cid)
-    chapterStructure.value = {
-      composite_char_len: st.composite_char_len,
-      storage_dir: st.storage_dir,
+  // Handle body API result
+  if (body.status === 'fulfilled') {
+    content.value = body.value.content || ''
+    if (content.value) {
+      createTime.value = new Date().toLocaleString('zh-CN', { hour12: false })
+      updateTime.value = createTime.value
     }
-  } catch {
+  }
+
+  // Handle review API result
+  if (rev.status === 'fulfilled') {
+    reviewStatus.value = rev.value.status
+    reviewMemo.value = rev.value.memo
+  }
+
+  // Handle structure API result (this one is optional, can fail gracefully)
+  if (structureResult.status === 'fulfilled') {
+    chapterStructure.value = {
+      composite_char_len: structureResult.value.composite_char_len,
+      storage_dir: structureResult.value.storage_dir ?? null,
+    }
+  } else {
     chapterStructure.value = null
   }
 
