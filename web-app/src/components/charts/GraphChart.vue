@@ -19,6 +19,11 @@ interface GraphLink {
   value?: number
 }
 
+interface EChartsEventParams {
+  dataType: 'node' | 'edge'
+  data: GraphNode | GraphLink
+}
+
 const props = withDefaults(defineProps<{
   nodes: GraphNode[]
   links: GraphLink[]
@@ -59,18 +64,18 @@ const chartOption = computed<EChartsOption>(() => ({
     }
   ],
   tooltip: {
-    formatter: (params: any) => {
+    formatter: (params: EChartsEventParams) => {
       if (params.dataType === 'node') {
-        return `${params.data.name}`
+        return `${(params.data as GraphNode).name}`
       }
-      return `${params.data.source} → ${params.data.target}`
+      return `${(params.data as GraphLink).source} → ${(params.data as GraphLink).target}`
     }
   }
 }))
 
-const handleNodeClick = (params: any) => {
+const handleNodeClick = (params: EChartsEventParams) => {
   if (params.dataType === 'node') {
-    emit('nodeClick', params.data)
+    emit('nodeClick', params.data as GraphNode)
   }
 }
 </script>

@@ -6,6 +6,7 @@
 import { computed } from 'vue'
 import ChartWrapper from './ChartWrapper.vue'
 import type { EChartsOption } from 'echarts'
+import { CHART_COLORS } from '@/constants/chartTheme'
 
 interface DistributionData {
   name: string
@@ -21,6 +22,11 @@ const props = withDefaults(defineProps<{
   height: '400px'
 })
 
+const chartData = computed(() => props.data.map(d => ({
+  name: d.name,
+  value: d.value
+})))
+
 const chartOption = computed<EChartsOption>(() => ({
   title: {
     text: props.title,
@@ -28,7 +34,7 @@ const chartOption = computed<EChartsOption>(() => ({
   },
   xAxis: {
     type: 'category',
-    data: props.data.map(d => d.name)
+    data: chartData.value.map(d => d.name)
   },
   yAxis: {
     type: 'value'
@@ -36,9 +42,9 @@ const chartOption = computed<EChartsOption>(() => ({
   series: [
     {
       type: 'bar',
-      data: props.data.map(d => d.value),
+      data: chartData.value.map(d => d.value),
       itemStyle: {
-        color: '#667eea'
+        color: CHART_COLORS.primary
       }
     }
   ],

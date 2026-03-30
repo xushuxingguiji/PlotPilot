@@ -6,6 +6,7 @@
 import { computed } from 'vue'
 import ChartWrapper from './ChartWrapper.vue'
 import type { EChartsOption } from 'echarts'
+import { CHART_COLORS } from '@/constants/chartTheme'
 
 interface TrendData {
   date: string
@@ -21,6 +22,11 @@ const props = withDefaults(defineProps<{
   height: '400px'
 })
 
+const chartData = computed(() => props.data.map(d => ({
+  date: d.date,
+  value: d.value
+})))
+
 const chartOption = computed<EChartsOption>(() => ({
   title: {
     text: props.title,
@@ -28,7 +34,7 @@ const chartOption = computed<EChartsOption>(() => ({
   },
   xAxis: {
     type: 'category',
-    data: props.data.map(d => d.date)
+    data: chartData.value.map(d => d.date)
   },
   yAxis: {
     type: 'value'
@@ -36,10 +42,10 @@ const chartOption = computed<EChartsOption>(() => ({
   series: [
     {
       type: 'line',
-      data: props.data.map(d => d.value),
+      data: chartData.value.map(d => d.value),
       smooth: true,
       itemStyle: {
-        color: '#667eea'
+        color: CHART_COLORS.primary
       },
       areaStyle: {
         color: {
@@ -49,8 +55,8 @@ const chartOption = computed<EChartsOption>(() => ({
           x2: 0,
           y2: 1,
           colorStops: [
-            { offset: 0, color: 'rgba(102, 126, 234, 0.3)' },
-            { offset: 1, color: 'rgba(102, 126, 234, 0.05)' }
+            { offset: 0, color: CHART_COLORS.gradientStart },
+            { offset: 1, color: CHART_COLORS.gradientEnd }
           ]
         }
       }
