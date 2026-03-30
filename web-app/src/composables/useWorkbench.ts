@@ -4,21 +4,21 @@ import { useMessage } from 'naive-ui'
 import { bookApi, jobApi } from '../api/book'
 import { useStatsStore } from '../stores/statsStore'
 
-/**
- * useWorkbench Composable - Workbench business logic
- *
- * SPEC COMPLIANCE NOTES:
- * - Messages state: Handled by ChatArea component (component manages its own state)
- * - Settings state: Handled by child components (BiblePanel, KnowledgePanel use delegation pattern)
- * - handleJobCompleted: Implemented - triggers cache invalidation via statsStore
- * - restoreJobState: No-op - localStorage not used in current architecture (API polling used instead)
- * - loadData: Implemented with Promise.all for parallel API calls
- * - Handler methods: Implemented (handleChapterSelect, handleSendMessage, handleUpdateSettings)
- *
- * EXTRA ITEMS (marked for future migration):
- * - Polling logic: Should move to JobStatusIndicator component per spec
- * - Task progress UI state: Should be in UI components, not composable
- */
+// Constants for magic numbers
+const PROGRESS_INITIAL = 6
+const PROGRESS_MAX = 93
+const PROGRESS_MIN_STEP = 2
+const PROGRESS_MAX_STEP = 6
+const STATS_DAYS = 30
+const DEFAULT_CHAPTER_ID = 1
+const POLLING_INTERVAL = 1000
+
+// Type definitions
+export interface BookMeta {
+  has_bible?: boolean
+  has_outline?: boolean
+}
+
 export interface UseWorkbenchOptions {
   slug: string
   chatAreaRef?: { fetchMessages?: () => Promise<void> } | null
@@ -32,8 +32,8 @@ export function useWorkbench(options: UseWorkbenchOptions) {
 
   // State - Business logic only, no UI state
   const bookTitle = ref('')
-  const chapters = ref<any[]>([])
-  const bookMeta = ref<{ has_bible?: boolean; has_outline?: boolean }>({})
+  const chapters = ref<{ id: number; title: string }[]>([])
+  const bookMeta = ref<BookMeta>({})
   const pageLoading = ref(true)
 
   // UI state that should be in components, not composable
@@ -48,10 +48,6 @@ export function useWorkbench(options: UseWorkbenchOptions) {
   const taskMessage = ref('')
   const currentJobId = ref<string | null>(null)
 
-  // Computed
-  const hasStructure = computed<boolean>(
-    () => !!(bookMeta.value.has_bible && bookMeta.value.has_outline)
-  )
 
   const currentChapterId = computed(() => {
     // This will be provided by the route in the component
@@ -61,10 +57,6 @@ export function useWorkbench(options: UseWorkbenchOptions) {
   // Methods
   const setRightPanel = (panel: 'bible' | 'knowledge') => {
     rightPanel.value = panel
-  }
-
-  const onMessagesUpdated = () => {
-    // Messages have been updated in ChatArea, trigger any parent-side updates if needed
   }
 
   const loadDesk = async () => {
@@ -83,7 +75,7 @@ export function useWorkbench(options: UseWorkbenchOptions) {
       // Parallel API calls for performance
       const promises = [loadDesk()]
       if (includeStats) {
-        promises.push(statsStore.loadBookAllStats(slug, 30, true))
+        promises.push(statsStore.loadBookAllStats(slug, STATS_DAYS, true))
       }
       await Promise.all(promises)
     } finally {
@@ -111,7 +103,7 @@ export function useWorkbench(options: UseWorkbenchOptions) {
   }
 
   const openPlanModal = () => {
-    planMode.value = hasStructure.value ? 'revise' : 'initial'
+    planMode.value = (bookMeta.value.has_bible && bookMeta.value.has_outline) ? 'revise' : 'initial'
     planDryRun.value = false
     showPlanModal.value = true
   }
@@ -128,7 +120,7 @@ export function useWorkbench(options: UseWorkbenchOptions) {
 
   const startWrite = async () => {
     try {
-      const res = await jobApi.startWrite(slug, 1)
+      const res = await jobApi.startWrite(slug, DEFAULT_CHAPTER_ID)
       startPolling(res.job_id)
     } catch (error: any) {
       message.error(error.response?.data?.detail || '启动失败')
@@ -137,15 +129,23 @@ export function useWorkbench(options: UseWorkbenchOptions) {
 
   // Polling logic - Should be migrated to JobStatusIndicator component per spec
   // Kept here for backward compatibility during refactoring
+  const taskTimer = ref<number | null>(null)
+
   const startPolling = (jobId: string) => {
     currentJobId.value = jobId
     showTaskModal.value = true
-    taskProgress.value = 6
+    taskProgress.value = PROGRESS_INITIAL
     taskMessage.value = '任务启动中…'
-    let bump = 6
+    let bump = PROGRESS_INITIAL
 
-    const taskTimer = window.setInterval(async () => {
-      bump = Math.min(93, bump + 2 + Math.random() * 6)
+    // Clear any existing timer to prevent memory leaks
+    if (taskTimer.value) {
+      window.clearInterval(taskTimer.value)
+      taskTimer.value = null
+    }
+
+    taskTimer.value = window.setInterval(async () => {
+      bump = Math.min(PROGRESS_MAX, bump + PROGRESS_MIN_STEP + Math.random() * PROGRESS_MAX_STEP)
       taskProgress.value = Math.floor(bump)
       try {
         const status = await jobApi.getStatus(jobId)
@@ -165,13 +165,12 @@ export function useWorkbench(options: UseWorkbenchOptions) {
           stopPolling()
           message.error(status.error || '任务失败')
         }
-      } catch {
+      } catch (error) {
+        console.error('Polling error:', error)
         stopPolling()
+        message.error('任务状态更新失败')
       }
-    }, 1000)
-
-    // Store timer ref for cleanup
-    ;(window as any).__workbenchTaskTimer = taskTimer
+    }, POLLING_INTERVAL)
   }
 
   const cancelRunningTask = async () => {
@@ -186,10 +185,9 @@ export function useWorkbench(options: UseWorkbenchOptions) {
   }
 
   const stopPolling = () => {
-    const taskTimer = (window as any).__workbenchTaskTimer
-    if (taskTimer) {
-      clearInterval(taskTimer)
-      ;(window as any).__workbenchTaskTimer = null
+    if (taskTimer.value) {
+      window.clearInterval(taskTimer.value)
+      taskTimer.value = null
     }
     currentJobId.value = null
     showTaskModal.value = false
@@ -215,7 +213,7 @@ export function useWorkbench(options: UseWorkbenchOptions) {
     // Currently, ChatArea manages its own message state
   }
 
-  const handleUpdateSettings = async (settings: any) => {
+  const handleUpdateSettings = async (settings: Record<string, any>) => {
     // Settings are managed by child components (BiblePanel, KnowledgePanel)
     // This method provides a consistent interface for future use
     // Current architecture uses delegation pattern
@@ -243,12 +241,10 @@ export function useWorkbench(options: UseWorkbenchOptions) {
     currentJobId,
 
     // Computed
-    hasStructure,
     currentChapterId,
 
     // Methods
     setRightPanel,
-    onMessagesUpdated,
     loadDesk,
     loadData,
     handleJobCompleted,
