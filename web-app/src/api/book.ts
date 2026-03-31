@@ -20,6 +20,7 @@ import type {
   JobStatusResponse,
 } from '../types/api'
 
+// Legacy API client (old /api endpoints)
 const request = axios.create({
   baseURL: '/api',
   timeout: 30000,
@@ -27,6 +28,12 @@ const request = axios.create({
 
 // 添加响应拦截器，直接返回数据
 request.interceptors.response.use(response => response.data)
+
+// Note: For new RESTful API endpoints, use:
+// - novelApi from './novel.ts' for novel operations
+// - chapterApi from './chapter.ts' for chapter operations
+// - bibleApi from './bible.ts' for bible operations
+// - aiApi from './ai.ts' for AI generation
 
 export const bookApi = {
   getList: () => request.get<BookListItem[]>('/books') as Promise<BookListItem[]>,
