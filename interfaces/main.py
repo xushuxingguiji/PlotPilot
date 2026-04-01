@@ -2,10 +2,25 @@
 
 提供 RESTful API 接口。
 """
+from pathlib import Path
+import sys
+
+# 必须在其他 aitext 模块导入前执行：将仓库根目录 `.env` 写入 os.environ
+_AITEXT_ROOT = Path(__file__).resolve().parents[1]
+if str(_AITEXT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_AITEXT_ROOT))
+try:
+    from load_env import load_env
+
+    load_env()
+except Exception:
+    # 无 .env 或非标准启动方式时忽略
+    pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from interfaces.api.v1 import novels, chapters, bible, cast, ai, knowledge, chat
+from interfaces.api.v1 import novels, chapters, bible, cast, ai, knowledge, chat, generation
 from web.routers.stats import create_stats_router
 from web.services.stats_service import StatsService
 from web.repositories.stats_repository_adapter import StatsRepositoryAdapter
@@ -36,6 +51,7 @@ app.include_router(cast.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
+app.include_router(generation.router, prefix="/api/v1")
 
 # 注册统计路由（使用适配器连接新架构）
 stats_repository = StatsRepositoryAdapter(DATA_DIR)

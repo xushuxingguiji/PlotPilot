@@ -5,6 +5,7 @@
 import os
 from pathlib import Path
 from functools import lru_cache
+from typing import Optional
 
 from application.paths import DATA_DIR
 from infrastructure.persistence.storage.file_storage import FileStorage
@@ -14,6 +15,8 @@ from infrastructure.persistence.repositories.file_bible_repository import FileBi
 from infrastructure.persistence.repositories.file_cast_repository import FileCastRepository
 from infrastructure.persistence.repositories.file_knowledge_repository import FileKnowledgeRepository
 from infrastructure.persistence.repositories.file_chat_repository import FileChatRepository
+from infrastructure.persistence.repositories.file_storyline_repository import FileStorylineRepository
+from infrastructure.persistence.repositories.file_plot_arc_repository import FilePlotArcRepository
 from infrastructure.ai.providers.anthropic_provider import AnthropicProvider
 from infrastructure.ai.config.settings import Settings
 
@@ -24,10 +27,38 @@ from application.services.cast_service import CastService
 from application.services.ai_generation_service import AIGenerationService
 from application.services.knowledge_service import KnowledgeService
 from application.services.chat_service import ChatService
+from application.services.context_builder import ContextBuilder
+from application.workflows.auto_novel_generation_workflow import AutoNovelGenerationWorkflow
+from domain.novel.services.consistency_checker import ConsistencyChecker
+from domain.novel.services.storyline_manager import StorylineManager
+from domain.bible.services.relationship_engine import RelationshipEngine
+from domain.ai.services.vector_store import VectorStore
 
 
 # 全局存储实例
 _storage = None
+
+
+def _anthropic_api_key() -> Optional[str]:
+    """优先 ANTHROPIC_API_KEY，否则 ANTHROPIC_AUTH_TOKEN（与部分代理/IDE 配置命名一致）。"""
+    return os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")
+
+
+def _anthropic_base_url() -> Optional[str]:
+    u = os.getenv("ANTHROPIC_BASE_URL")
+    return u.strip() if u and u.strip() else None
+
+
+def _anthropic_settings(require_key: bool = True) -> Optional[Settings]:
+    """构建 Anthropic Settings；require_key=False 时无密钥返回 None。"""
+    key = _anthropic_api_key()
+    if not key:
+        if require_key:
+            raise ValueError(
+                "Set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN (optional: ANTHROPIC_BASE_URL)"
+            )
+        return None
+    return Settings(api_key=key, base_url=_anthropic_base_url())
 
 
 def get_storage() -> FileStorage:
@@ -97,6 +128,24 @@ def get_chat_repository() -> FileChatRepository:
     return FileChatRepository(get_storage())
 
 
+def get_storyline_repository() -> FileStorylineRepository:
+    """获取 Storyline 仓储
+
+    Returns:
+        FileStorylineRepository 实例
+    """
+    return FileStorylineRepository(get_storage())
+
+
+def get_plot_arc_repository() -> FilePlotArcRepository:
+    """获取 PlotArc 仓储
+
+    Returns:
+        FilePlotArcRepository 实例
+    """
+    return FilePlotArcRepository(get_storage())
+
+
 # Service 依赖
 def get_novel_service() -> NovelService:
     """获取 Novel 服务
@@ -143,11 +192,7 @@ def get_ai_generation_service() -> AIGenerationService:
     Returns:
         AIGenerationService 实例
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
-
-    settings = Settings(api_key=api_key)
+    settings = _anthropic_settings(require_key=True)
     llm_service = AnthropicProvider(settings)
 
     return AIGenerationService(
@@ -174,11 +219,8 @@ def get_chat_service() -> ChatService:
     Returns:
         ChatService 实例
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    llm_service = None
-    if api_key:
-        settings = Settings(api_key=api_key)
-        llm_service = AnthropicProvider(settings)
+    settings = _anthropic_settings(require_key=False)
+    llm_service = AnthropicProvider(settings) if settings else None
 
     return ChatService(
         get_chat_repository(),
@@ -187,4 +229,82 @@ def get_chat_service() -> ChatService:
         get_bible_repository(),
         get_cast_repository(),
         get_knowledge_repository()
+    )
+
+
+def get_storyline_manager() -> StorylineManager:
+    """获取 Storyline 管理器
+
+    Returns:
+        StorylineManager 实例
+    """
+    return StorylineManager(get_storyline_repository())
+
+
+def get_consistency_checker() -> ConsistencyChecker:
+    """获取一致性检查器
+
+    Returns:
+        ConsistencyChecker 实例
+    """
+    return ConsistencyChecker()
+
+
+def get_vector_store() -> VectorStore:
+    """获取向量存储（简化实现）
+
+    Returns:
+        VectorStore 实例（Mock）
+    """
+    # 简化实现：返回 None，实际应该返回真实的向量存储
+    # 在测试和开发中可以使用 Mock
+    return None
+
+
+def get_relationship_engine() -> RelationshipEngine:
+    """获取关系引擎
+
+    Returns:
+        RelationshipEngine 实例
+    """
+    from domain.bible.value_objects.relationship_graph import RelationshipGraph
+    return RelationshipEngine(RelationshipGraph())
+
+
+def get_context_builder() -> ContextBuilder:
+    """获取上下文构建器
+
+    Returns:
+        ContextBuilder 实例
+    """
+    from domain.bible.entities.character_registry import CharacterRegistry
+
+    # 创建空的 CharacterRegistry（简化实现）
+    character_registry = CharacterRegistry(id="temp")
+
+    return ContextBuilder(
+        character_registry=character_registry,
+        storyline_manager=get_storyline_manager(),
+        relationship_engine=get_relationship_engine(),
+        vector_store=get_vector_store(),
+        novel_repository=get_novel_repository(),
+        chapter_repository=get_chapter_repository()
+    )
+
+
+def get_auto_workflow() -> AutoNovelGenerationWorkflow:
+    """获取自动小说生成工作流
+
+    Returns:
+        AutoNovelGenerationWorkflow 实例
+    """
+    settings = _anthropic_settings(require_key=True)
+    llm_service = AnthropicProvider(settings)
+
+    return AutoNovelGenerationWorkflow(
+        context_builder=get_context_builder(),
+        consistency_checker=get_consistency_checker(),
+        storyline_manager=get_storyline_manager(),
+        plot_arc_repository=get_plot_arc_repository(),
+        llm_service=llm_service
     )

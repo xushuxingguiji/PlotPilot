@@ -1,0 +1,217 @@
+"""API 端点测试 - 生成工作流"""
+import pytest
+from unittest.mock import Mock, AsyncMock
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from interfaces.api.v1.generation import router
+from application.workflows.auto_novel_generation_workflow import AutoNovelGenerationWorkflow
+from application.dtos.generation_result import GenerationResult
+from domain.novel.value_objects.consistency_report import ConsistencyReport
+from domain.novel.services.storyline_manager import StorylineManager
+from domain.novel.repositories.plot_arc_repository import PlotArcRepository
+from domain.novel.entities.storyline import Storyline
+from domain.novel.value_objects.novel_id import NovelId
+from domain.novel.value_objects.storyline_type import StorylineType
+from domain.novel.value_objects.storyline_status import StorylineStatus
+from domain.novel.entities.plot_arc import PlotArc
+from domain.novel.value_objects.plot_point import PlotPoint, PlotPointType
+from domain.novel.value_objects.tension_level import TensionLevel
+
+
+@pytest.fixture
+def mock_workflow():
+    """Mock AutoNovelGenerationWorkflow"""
+    workflow = Mock(spec=AutoNovelGenerationWorkflow)
+    workflow.generate_chapter = AsyncMock(return_value=GenerationResult(
+        content="Generated chapter content",
+        consistency_report=ConsistencyReport(issues=[], warnings=[], suggestions=[]),
+        context_used="Mock context",
+        token_count=8750
+    ))
+    return workflow
+
+
+@pytest.fixture
+def mock_storyline_manager():
+    """Mock StorylineManager"""
+    manager = Mock(spec=StorylineManager)
+    manager.repository = Mock()
+    manager.repository.find_by_novel.return_value = [
+        Storyline(
+            id="storyline-1",
+            novel_id=NovelId("novel-1"),
+            storyline_type=StorylineType.MAIN_PLOT,
+            status=StorylineStatus.ACTIVE,
+            estimated_chapter_start=1,
+            estimated_chapter_end=10
+        )
+    ]
+    manager.create_storyline.return_value = Storyline(
+        id="storyline-2",
+        novel_id=NovelId("novel-1"),
+        storyline_type=StorylineType.ROMANCE,
+        status=StorylineStatus.ACTIVE,
+        estimated_chapter_start=5,
+        estimated_chapter_end=15
+    )
+    return manager
+
+
+@pytest.fixture
+def mock_plot_arc_repository():
+    """Mock PlotArcRepository"""
+    repo = Mock(spec=PlotArcRepository)
+    plot_arc = PlotArc(id="arc-1", novel_id=NovelId("novel-1"))
+    plot_arc.add_plot_point(PlotPoint(
+        chapter_number=1,
+        point_type=PlotPointType.OPENING,
+        description="Opening",
+        tension=TensionLevel.LOW
+    ))
+    plot_arc.add_plot_point(PlotPoint(
+        chapter_number=50,
+        point_type=PlotPointType.CLIMAX,
+        description="Climax",
+        tension=TensionLevel.PEAK
+    ))
+    repo.get_by_novel_id.return_value = plot_arc
+    repo.save.return_value = None
+    return repo
+
+
+@pytest.fixture
+def app(mock_workflow, mock_storyline_manager, mock_plot_arc_repository):
+    """创建测试应用"""
+    test_app = FastAPI()
+    test_app.include_router(router, prefix="/api/v1")
+
+    # Override dependencies
+    from interfaces.api.v1 import generation
+    test_app.dependency_overrides[generation.get_auto_workflow] = lambda: mock_workflow
+    test_app.dependency_overrides[generation.get_storyline_manager] = lambda: mock_storyline_manager
+    test_app.dependency_overrides[generation.get_plot_arc_repository] = lambda: mock_plot_arc_repository
+
+    return test_app
+
+
+@pytest.fixture
+def client(app):
+    """创建测试客户端"""
+    return TestClient(app)
+
+
+class TestGenerateChapterEndpoint:
+    """测试章节生成端点"""
+
+    def test_generate_chapter_success(self, client, mock_workflow):
+        """测试成功生成章节"""
+        response = client.post(
+            "/api/v1/novels/novel-1/generate-chapter",
+            json={
+                "chapter_number": 1,
+                "outline": "Chapter 1 outline"
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["content"] == "Generated chapter content"
+        assert "consistency_report" in data
+        assert data["token_count"] == 8750
+
+        # Verify workflow was called
+        mock_workflow.generate_chapter.assert_called_once()
+
+    def test_generate_chapter_invalid_chapter_number(self, client):
+        """测试无效章节号"""
+        response = client.post(
+            "/api/v1/novels/novel-1/generate-chapter",
+            json={
+                "chapter_number": 0,
+                "outline": "Chapter outline"
+            }
+        )
+
+        assert response.status_code == 422  # Validation error
+
+    def test_generate_chapter_empty_outline(self, client):
+        """测试空大纲"""
+        response = client.post(
+            "/api/v1/novels/novel-1/generate-chapter",
+            json={
+                "chapter_number": 1,
+                "outline": ""
+            }
+        )
+
+        assert response.status_code == 422  # Validation error
+
+
+class TestStorylineEndpoints:
+    """测试故事线端点"""
+
+    def test_get_storylines(self, client, mock_storyline_manager):
+        """测试获取故事线列表"""
+        response = client.get("/api/v1/novels/novel-1/storylines")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["storyline_type"] == "main_plot"
+
+    def test_create_storyline(self, client, mock_storyline_manager):
+        """测试创建故事线"""
+        response = client.post(
+            "/api/v1/novels/novel-1/storylines",
+            json={
+                "storyline_type": "romance",
+                "estimated_chapter_start": 5,
+                "estimated_chapter_end": 15
+            }
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["storyline_type"] == "romance"
+        assert data["estimated_chapter_start"] == 5
+
+
+class TestPlotArcEndpoints:
+    """测试情节弧端点"""
+
+    def test_get_plot_arc(self, client, mock_plot_arc_repository):
+        """测试获取情节弧"""
+        response = client.get("/api/v1/novels/novel-1/plot-arc")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "key_points" in data
+        assert len(data["key_points"]) == 2
+
+    def test_create_plot_arc(self, client, mock_plot_arc_repository):
+        """测试创建/更新情节弧"""
+        response = client.post(
+            "/api/v1/novels/novel-1/plot-arc",
+            json={
+                "key_points": [
+                    {
+                        "chapter_number": 1,
+                        "tension": 1,
+                        "description": "Opening",
+                        "point_type": "opening"
+                    },
+                    {
+                        "chapter_number": 100,
+                        "tension": 4,
+                        "description": "Climax",
+                        "point_type": "climax"
+                    }
+                ]
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "key_points" in data
+
