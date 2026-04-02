@@ -46,13 +46,19 @@ class HostedWriteService:
         事件在单章事件上增加 ``chapter``；并可能发出 ``session`` / ``chapter_start`` /
         ``outline`` / ``saved``。
         """
-        import sys
-        print(f"[HOSTED_WRITE_V2] Starting stream_hosted_write for novel {novel_id}, chapters {from_chapter}-{to_chapter}, auto_save={auto_save}", file=sys.stderr, flush=True)
+        logger.info(f"========================================")
+        logger.info(f"开始托管连写: 小说={novel_id}, 章节范围={from_chapter}-{to_chapter}")
+        logger.info(f"配置: auto_save={auto_save}, auto_outline={auto_outline}")
+        logger.info(f"========================================")
+
         if from_chapter < 1 or to_chapter < 1 or to_chapter < from_chapter:
+            logger.error(f"无效的章节范围: {from_chapter}-{to_chapter}")
             yield {"type": "error", "message": "invalid chapter range"}
             return
 
         total = to_chapter - from_chapter + 1
+        logger.info(f"总计需要生成 {total} 个章节")
+
         yield {
             "type": "session",
             "novel_id": novel_id,
@@ -62,15 +68,22 @@ class HostedWriteService:
         }
 
         for index, n in enumerate(range(from_chapter, to_chapter + 1), start=1):
+            logger.info(f"----------------------------------------")
+            logger.info(f"开始处理章节 {n} ({index}/{total})")
+            logger.info(f"----------------------------------------")
+
             yield {"type": "chapter_start", "chapter": n, "index": index, "total": total}
 
             if auto_outline:
                 try:
+                    logger.info(f"  → 使用 LLM 生成章节 {n} 的大纲")
                     outline = await self._workflow.suggest_outline(novel_id, n)
+                    logger.info(f"  ✓ 大纲生成成功: {len(outline)} 字符")
                 except Exception as e:
-                    logger.warning("suggest_outline raised: %s", e)
+                    logger.warning(f"  × 大纲生成失败: {e}, 使用默认模板")
                     outline = self._fallback_outline(novel_id, n)
             else:
+                logger.info(f"  → 使用默认大纲模板")
                 outline = self._fallback_outline(novel_id, n)
 
             yield {"type": "outline", "chapter": n, "text": outline}
@@ -82,19 +95,17 @@ class HostedWriteService:
 
                 if ev.get("type") == "done" and auto_save:
                     content = ev.get("content") or ""
-                    import sys
-                    print(f"[DEBUG] Attempting to save chapter {n}", file=sys.stderr, flush=True)
+                    logger.info(f"  → 尝试保存章节 {n} ({len(content)} 字符)")
                     try:
                         # 先尝试更新已存在的章节
                         self._chapter.update_chapter_by_novel_and_number(
                             novel_id, n, content
                         )
-                        print(f"[DEBUG] Chapter {n} updated successfully", file=sys.stderr, flush=True)
+                        logger.info(f"  ✓ 章节 {n} 更新成功")
                         yield {"type": "saved", "chapter": n, "ok": True}
                     except EntityNotFoundError as e:
                         # 章节不存在，创建新章节
-                        print(f"[DEBUG] EntityNotFoundError caught: {e}", file=sys.stderr, flush=True)
-                        logger.info(f"Chapter {n} not found, creating new: {e}")
+                        logger.info(f"  → 章节 {n} 不存在，创建新章节")
                         try:
                             chapter_id = f"chapter-{novel_id}-{n}"
                             title = f"第{n}章"
@@ -105,11 +116,10 @@ class HostedWriteService:
                                 title=title,
                                 content=content
                             )
-                            print(f"[DEBUG] Chapter {n} created successfully", file=sys.stderr, flush=True)
+                            logger.info(f"  ✓ 章节 {n} 创建成功")
                             yield {"type": "saved", "chapter": n, "ok": True, "created": True}
                         except (ValueError, Exception) as create_ex:
-                            print(f"[DEBUG] Failed to create: {type(create_ex).__name__}: {create_ex}", file=sys.stderr, flush=True)
-                            logger.error(f"Failed to create chapter {n}: {create_ex}")
+                            logger.error(f"  × 创建章节 {n} 失败: {type(create_ex).__name__}: {create_ex}")
                             yield {
                                 "type": "saved",
                                 "chapter": n,
@@ -117,8 +127,7 @@ class HostedWriteService:
                                 "message": f"创建章节失败: {create_ex}",
                             }
                     except Exception as ex:
-                        print(f"[DEBUG] Exception caught: {type(ex).__name__}: {ex}", file=sys.stderr, flush=True)
-                        logger.error(f"Unexpected error saving chapter {n}: {type(ex).__name__}: {ex}")
+                        logger.error(f"  × 保存章节 {n} 时发生异常: {type(ex).__name__}: {ex}")
                         yield {
                             "type": "saved",
                             "chapter": n,
@@ -127,6 +136,10 @@ class HostedWriteService:
                         }
 
                 if ev.get("type") == "error":
+                    logger.error(f"  × 章节 {n} 生成失败，终止托管连写")
                     return
 
+        logger.info(f"========================================")
+        logger.info(f"托管连写完成: 小说={novel_id}, 共生成 {total} 个章节")
+        logger.info(f"========================================")
         yield {"type": "session_done", "novel_id": novel_id}

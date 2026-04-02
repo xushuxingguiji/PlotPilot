@@ -120,46 +120,61 @@ class AutoNovelGenerationWorkflow:
         if not outline or not outline.strip():
             raise ValueError("outline cannot be empty")
 
-        logger.info(f"Starting chapter generation: novel={novel_id}, chapter={chapter_number}")
+        logger.info(f"========================================")
+        logger.info(f"开始生成章节: 小说={novel_id}, 章节={chapter_number}")
+        logger.info(f"大纲: {outline[:100]}...")
+        logger.info(f"========================================")
 
         # Phase 1: Planning - 获取故事线和情节弧信息
-        logger.debug("Phase 1: Planning")
+        logger.info("阶段 1: 规划 - 获取故事线和情节上下文")
         storyline_context = self._get_storyline_context(novel_id, chapter_number)
+        logger.info(f"  ✓ 故事线上下文: {len(storyline_context)} 字符")
         plot_tension = self._get_plot_tension(novel_id, chapter_number)
+        logger.info(f"  ✓ 情节张力: {plot_tension[:100]}...")
 
         # Phase 2: Pre-Generation - 构建上下文
-        logger.debug("Phase 2: Pre-Generation - Building context")
+        logger.info("阶段 2: 预生成 - 构建上下文")
         context = self.context_builder.build_context(
             novel_id=novel_id,
             chapter_number=chapter_number,
             outline=outline,
             max_tokens=35000
         )
+        context_tokens = self.context_builder.estimate_tokens(context)
+        logger.info(f"  ✓ 上下文已构建: {len(context)} 字符, 约 {context_tokens} tokens")
 
         # Phase 3: Generation - 调用 LLM
-        logger.debug("Phase 3: Generation - Calling LLM")
+        logger.info("阶段 3: 生成 - 调用 LLM")
         prompt = self._build_prompt(context, outline)
         config = GenerationConfig()
+        logger.info(f"  → 发送请求到 LLM (max_tokens={config.max_tokens}, temperature={config.temperature})")
         llm_result = await self.llm_service.generate(prompt, config)
         content = llm_result.content
+        logger.info(f"  ✓ LLM 响应已接收: {len(content)} 字符")
 
         # Phase 4: Post-Generation - 提取状态和检查一致性
-        logger.debug("Phase 4: Post-Generation - Extracting state and checking consistency")
+        logger.info("阶段 4: 后处理 - 提取状态和检查一致性")
         chapter_state = await self._extract_chapter_state(content, chapter_number)
+        logger.info(f"  ✓ 状态已提取: {len(chapter_state.new_characters)} 个新角色, {len(chapter_state.events)} 个事件")
         consistency_report = self._check_consistency(chapter_state, novel_id)
+        logger.info(f"  ✓ 一致性检查: {len(consistency_report.issues)} 个问题, {len(consistency_report.warnings)} 个警告")
 
         # Phase 4.5: Update State - 更新 Bible 和 Knowledge
         if self.state_updater:
             try:
-                logger.info(f"Updating Bible and Knowledge for chapter {chapter_number}")
+                logger.info(f"阶段 4.5: 更新状态 - 更新 Bible 和 Knowledge (章节 {chapter_number})")
                 self.state_updater.update_from_chapter(novel_id, chapter_number, chapter_state)
-                logger.info("State update completed")
+                logger.info("  ✓ 状态更新完成")
             except Exception as e:
-                logger.warning(f"StateUpdater failed: {e}")
+                logger.warning(f"  × StateUpdater 失败: {e}")
 
         # Phase 5: Review - 返回结果
-        logger.info(f"Chapter generation completed: novel={novel_id}, chapter={chapter_number}")
+        logger.info(f"阶段 5: 完成 - 章节生成完成")
         token_count = self.context_builder.estimate_tokens(context)
+        logger.info(f"  ✓ 总计: {len(content)} 字符, {token_count} tokens")
+        logger.info(f"========================================")
+        logger.info(f"章节生成完成: 小说={novel_id}, 章节={chapter_number}")
+        logger.info(f"========================================")
 
         return GenerationResult(
             content=content,
@@ -188,45 +203,67 @@ class AutoNovelGenerationWorkflow:
             if not outline or not outline.strip():
                 raise ValueError("outline cannot be empty")
 
+            logger.info(f"========================================")
+            logger.info(f"开始流式生成章节: 小说={novel_id}, 章节={chapter_number}")
+            logger.info(f"========================================")
+
             yield {"type": "phase", "phase": "planning"}
+            logger.info("阶段 1: 规划 - 获取故事线和情节上下文")
             _ = self._get_storyline_context(novel_id, chapter_number)
             _ = self._get_plot_tension(novel_id, chapter_number)
+            logger.info("  ✓ 规划阶段完成")
 
             yield {"type": "phase", "phase": "context"}
+            logger.info("阶段 2: 预生成 - 构建上下文")
             context = self.context_builder.build_context(
                 novel_id=novel_id,
                 chapter_number=chapter_number,
                 outline=outline,
                 max_tokens=35000,
             )
+            context_tokens = self.context_builder.estimate_tokens(context)
+            logger.info(f"  ✓ 上下文已构建: {len(context)} 字符, 约 {context_tokens} tokens")
 
             yield {"type": "phase", "phase": "llm"}
+            logger.info("阶段 3: 生成 - 调用 LLM 流式生成")
             prompt = self._build_prompt(context, outline)
             config = GenerationConfig()
+            logger.info(f"  → 发送流式请求到 LLM")
             parts: list[str] = []
+            chunk_count = 0
             async for piece in self.llm_service.stream_generate(prompt, config):
                 parts.append(piece)
+                chunk_count += 1
                 yield {"type": "chunk", "text": piece}
 
             content = "".join(parts)
+            logger.info(f"  ✓ LLM 流式响应完成: {chunk_count} 个块, {len(content)} 字符")
+
             if not content.strip():
+                logger.error("  × 模型返回空内容")
                 yield {"type": "error", "message": "模型返回空内容"}
                 return
 
             yield {"type": "phase", "phase": "post"}
+            logger.info("阶段 4: 后处理 - 提取状态和检查一致性")
             chapter_state = await self._extract_chapter_state(content, chapter_number)
+            logger.info(f"  ✓ 状态已提取: {len(chapter_state.new_characters)} 个新角色, {len(chapter_state.events)} 个事件")
             consistency_report = self._check_consistency(chapter_state, novel_id)
+            logger.info(f"  ✓ 一致性检查: {len(consistency_report.issues)} 个问题, {len(consistency_report.warnings)} 个警告")
 
             # Phase 4.5: Update State - 更新 Bible 和 Knowledge
             if self.state_updater:
                 try:
-                    logger.info(f"Updating Bible and Knowledge for chapter {chapter_number}")
+                    logger.info(f"阶段 4.5: 更新状态 - 更新 Bible 和 Knowledge")
                     self.state_updater.update_from_chapter(novel_id, chapter_number, chapter_state)
-                    logger.info("State update completed")
+                    logger.info("  ✓ 状态更新完成")
                 except Exception as e:
-                    logger.warning(f"StateUpdater failed: {e}")
+                    logger.warning(f"  × StateUpdater 失败: {e}")
 
             token_count = self.context_builder.estimate_tokens(context)
+            logger.info(f"========================================")
+            logger.info(f"流式章节生成完成: 小说={novel_id}, 章节={chapter_number}")
+            logger.info(f"========================================")
 
             yield {
                 "type": "done",
@@ -235,9 +272,10 @@ class AutoNovelGenerationWorkflow:
                 "token_count": token_count,
             }
         except ValueError as e:
+            logger.error(f"参数错误: {e}")
             yield {"type": "error", "message": str(e)}
         except Exception as e:
-            logger.exception("generate_chapter_stream failed")
+            logger.exception("流式生成章节失败")
             yield {"type": "error", "message": str(e)}
 
     async def suggest_outline(self, novel_id: str, chapter_number: int) -> str:

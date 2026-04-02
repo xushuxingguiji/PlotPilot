@@ -136,6 +136,10 @@ async def generate_chapter(
     - 一致性检查
     - 返回结果和报告
     """
+    logger.info(f"API 请求: POST /{novel_id}/generate-chapter")
+    logger.info(f"  章节号: {request.chapter_number}")
+    logger.info(f"  大纲长度: {len(request.outline)} 字符")
+
     try:
         result = await workflow.generate_chapter(
             novel_id=novel_id,
@@ -164,6 +168,11 @@ async def generate_chapter(
             for warning in result.consistency_report.warnings
         ]
 
+        logger.info(f"API 响应: 生成成功")
+        logger.info(f"  内容长度: {len(result.content)} 字符")
+        logger.info(f"  Token 数: {result.token_count}")
+        logger.info(f"  问题数: {len(issues)}, 警告数: {len(warnings)}")
+
         return GenerateChapterResponse(
             content=result.content,
             consistency_report=ConsistencyReportResponse(
@@ -174,8 +183,10 @@ async def generate_chapter(
             token_count=result.token_count
         )
     except ValueError as e:
+        logger.error(f"API 错误: 参数无效 - {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
+        logger.exception(f"API 错误: 生成失败")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Generation failed: {str(e)}"
@@ -199,6 +210,9 @@ async def generate_chapter_stream(
     - ``done``: 完整 ``content``、``consistency_report``、``token_count``
     - ``error``: ``message``
     """
+    logger.info(f"API 请求: POST /{novel_id}/generate-chapter-stream (SSE)")
+    logger.info(f"  章节号: {request.chapter_number}")
+    logger.info(f"  大纲长度: {len(request.outline)} 字符")
 
     async def event_gen():
         async for event in workflow.generate_chapter_stream(
@@ -233,7 +247,12 @@ async def hosted_write_stream(
     额外事件：``session``、``chapter_start``、``outline``、``saved``、``session_done``；
     单章事件均带 ``chapter`` 字段。
     """
+    logger.info(f"API 请求: POST /{novel_id}/hosted-write-stream (SSE)")
+    logger.info(f"  章节范围: {request.from_chapter}-{request.to_chapter}")
+    logger.info(f"  auto_save: {request.auto_save}, auto_outline: {request.auto_outline}")
+
     if request.to_chapter < request.from_chapter:
+        logger.error(f"API 错误: to_chapter < from_chapter")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="to_chapter must be >= from_chapter",
