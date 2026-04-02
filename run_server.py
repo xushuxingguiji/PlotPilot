@@ -18,7 +18,7 @@ def find_pid_by_port(port):
             ['netstat', '-ano'],
             capture_output=True,
             text=True,
-            encoding='gbk',
+            encoding='utf-8',
             errors='ignore'
         )
         for line in result.stdout.split('\n'):

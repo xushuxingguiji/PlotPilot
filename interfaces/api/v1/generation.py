@@ -494,7 +494,8 @@ async def plan_novel(
     request: PlanRequest,
     workflow: AutoNovelGenerationWorkflow = Depends(get_auto_workflow),
     bible_service = Depends(get_bible_service),
-    novel_service = Depends(get_novel_service)
+    novel_service = Depends(get_novel_service),
+    chapter_service = Depends(get_chapter_service)
 ):
     """大纲规划：生成 Bible + 分章大纲
 
