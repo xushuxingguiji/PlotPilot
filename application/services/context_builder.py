@@ -1,7 +1,5 @@
 from typing import List, Optional
-from domain.bible.entities.character_registry import CharacterRegistry
-from domain.bible.entities.character import Character
-from domain.bible.value_objects.character_importance import CharacterImportance
+from application.services.bible_service import BibleService
 from domain.bible.services.relationship_engine import RelationshipEngine
 from domain.novel.services.storyline_manager import StorylineManager
 from domain.novel.repositories.novel_repository import NovelRepository
@@ -23,14 +21,14 @@ class ContextBuilder:
 
     def __init__(
         self,
-        character_registry: CharacterRegistry,
+        bible_service: BibleService,
         storyline_manager: StorylineManager,
         relationship_engine: RelationshipEngine,
         vector_store: VectorStore,
         novel_repository: NovelRepository,
         chapter_repository: ChapterRepository
     ):
-        self.character_registry = character_registry
+        self.bible_service = bible_service
         self.storyline_manager = storyline_manager
         self.relationship_engine = relationship_engine
         self.vector_store = vector_store
@@ -176,9 +174,9 @@ class ContextBuilder:
         """构建 Layer 2: 智能检索
 
         包含：
-        - 主角信息（完整：~1000 tokens）
-        - 主要配角（详细：~800 tokens each）
-        - 重要配角（中等：~150 tokens each）
+        - Bible 中的角色信息
+        - Bible 中的地点信息
+        - Bible 中的风格设定
         - 相关过往章节（向量搜索）
         - 相关事件
         - 关键关系
@@ -195,36 +193,45 @@ class ContextBuilder:
         parts = []
         remaining_budget = budget
 
-        # 获取角色信息
-        characters = self.character_registry.get_characters_for_context(
-            outline=outline,
-            max_tokens=int(budget * 0.6),  # 60% 给角色
-            relationship_graph=self.relationship_engine._graph
-        )
+        # 从 Bible 获取数据
+        bible_dto = self.bible_service.get_bible_by_novel(novel_id)
 
-        if characters:
-            parts.append("Characters:")
-            for char in characters:
-                # 获取角色重要性
-                importance = self._get_character_importance(char)
-                char_info = self._format_character_info(char, importance)
+        if bible_dto:
+            # 角色信息
+            if bible_dto.characters:
+                parts.append("Characters:")
+                for char in bible_dto.characters:
+                    char_info = f"- {char.name}: {char.description}"
 
-                # 检查预算
-                if self.estimate_tokens("\n".join(parts) + char_info) > remaining_budget:
-                    break
+                    # 检查预算
+                    if self.estimate_tokens("\n".join(parts) + char_info) > remaining_budget * 0.6:
+                        break
 
-                parts.append(char_info)
+                    parts.append(char_info)
 
-        # 关键关系
-        if characters and len(characters) >= 2:
-            parts.append("\nKey Relationships:")
-            for i, char1 in enumerate(characters[:5]):  # 限制前5个角色
-                for char2 in characters[i+1:6]:
-                    rel = self.relationship_engine.get_current_relationship(
-                        char1.character_id, char2.character_id
-                    )
-                    if rel:
-                        parts.append(f"- {char1.name} & {char2.name}: {rel.relation_type.value}")
+            # 地点信息
+            if bible_dto.locations:
+                parts.append("\nLocations:")
+                for loc in bible_dto.locations:
+                    loc_info = f"- {loc.name} ({loc.location_type}): {loc.description}"
+
+                    # 检查预算
+                    if self.estimate_tokens("\n".join(parts) + loc_info) > remaining_budget * 0.8:
+                        break
+
+                    parts.append(loc_info)
+
+            # 风格设定
+            if bible_dto.style_notes:
+                parts.append("\nStyle Guidelines:")
+                for note in bible_dto.style_notes:
+                    style_info = f"- {note.category}: {note.content}"
+
+                    # 检查预算
+                    if self.estimate_tokens("\n".join(parts) + style_info) > remaining_budget:
+                        break
+
+                    parts.append(style_info)
 
         context = "\n".join(parts)
 
@@ -285,37 +292,6 @@ class ContextBuilder:
             context = self._truncate_text(context, budget)
 
         return context
-
-    def _get_character_importance(self, character: Character) -> CharacterImportance:
-        """获取角色重要性级别"""
-        for importance, chars in self.character_registry.characters_by_importance.items():
-            if character in chars:
-                return importance
-        return CharacterImportance.BACKGROUND
-
-    def _format_character_info(
-        self,
-        character: Character,
-        importance: CharacterImportance
-    ) -> str:
-        """格式化角色信息
-
-        根据重要性级别决定详细程度
-        """
-        if importance == CharacterImportance.PROTAGONIST:
-            # 主角：完整信息 (~1000 tokens)
-            return f"\n[PROTAGONIST] {character.name}\n{character.description}"
-        elif importance == CharacterImportance.MAJOR_SUPPORTING:
-            # 主要配角：详细信息 (~800 tokens)
-            return f"\n[MAJOR] {character.name}\n{character.description}"
-        elif importance == CharacterImportance.IMPORTANT_SUPPORTING:
-            # 重要配角：中等信息 (~150 tokens)
-            desc = character.description[:600] if len(character.description) > 600 else character.description
-            return f"\n[IMPORTANT] {character.name}\n{desc}"
-        else:
-            # 次要角色：简短信息 (~50 tokens)
-            desc = character.description[:200] if len(character.description) > 200 else character.description
-            return f"\n[MINOR] {character.name}: {desc}"
 
     def _truncate_text(self, text: str, budget: int) -> str:
         """截断文本到指定 token 预算"""
