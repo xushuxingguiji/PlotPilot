@@ -5,7 +5,27 @@ from application.dtos.scene_director_dto import (
     SceneDirectorAnalysis,
     SceneDirectorAnalyzeRequest,
     SceneDirectorAnalyzeResponse,
+    ContextRetrieveRequest,
+    validate_outline_not_empty,
 )
+
+
+def test_validate_outline_not_empty_rejects_empty_string():
+    """Test that validate_outline_not_empty rejects empty strings."""
+    with pytest.raises(ValueError, match="outline cannot be empty or whitespace only"):
+        validate_outline_not_empty("")
+
+
+def test_validate_outline_not_empty_rejects_whitespace():
+    """Test that validate_outline_not_empty rejects whitespace-only strings."""
+    with pytest.raises(ValueError, match="outline cannot be empty or whitespace only"):
+        validate_outline_not_empty("   \n\t  ")
+
+
+def test_validate_outline_not_empty_accepts_valid_outline():
+    """Test that validate_outline_not_empty accepts valid outlines."""
+    result = validate_outline_not_empty("valid outline")
+    assert result == "valid outline"
 
 
 def test_scene_director_analysis_accepts_valid_payload():
@@ -81,3 +101,21 @@ def test_outline_request_accepts_valid_chapter_number():
 
     req = SceneDirectorAnalyzeRequest(chapter_number=100, outline="valid outline")
     assert req.chapter_number == 100
+
+
+def test_context_retrieve_request_rejects_empty_outline():
+    """Test that ContextRetrieveRequest rejects empty outline."""
+    with pytest.raises(ValidationError):
+        ContextRetrieveRequest(chapter_number=1, outline="   ")
+
+
+def test_context_retrieve_request_uses_shared_validator():
+    """Test that ContextRetrieveRequest uses the shared outline validator."""
+    # Valid outline should work
+    req = ContextRetrieveRequest(chapter_number=1, outline="valid outline")
+    assert req.outline == "valid outline"
+
+    # Invalid outline should fail
+    with pytest.raises(ValidationError):
+        ContextRetrieveRequest(chapter_number=1, outline="")
+

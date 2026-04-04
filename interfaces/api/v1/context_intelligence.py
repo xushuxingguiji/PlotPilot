@@ -6,9 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from application.dtos.scene_director_dto import (
     SceneDirectorAnalyzeRequest,
     SceneDirectorAnalyzeResponse,
+    SceneDirectorAnalysis,
+    ContextRetrieveRequest,
+    ContextRetrieveResponse,
 )
 from application.services.scene_director_service import SceneDirectorService
-from interfaces.api.dependencies import get_scene_director_service
+from application.services.context_builder import ContextBuilder
+from interfaces.api.dependencies import get_scene_director_service, get_context_builder
 
 logger = logging.getLogger(__name__)
 
@@ -41,3 +45,46 @@ async def analyze_scene(
             detail="Failed to analyze scene"
         ) from e
     return SceneDirectorAnalyzeResponse(**r.model_dump())
+
+
+@router.post("/{novel_id}/context/retrieve", response_model=ContextRetrieveResponse)
+def retrieve_context(
+    novel_id: str,
+    body: ContextRetrieveRequest,
+    builder: ContextBuilder = Depends(get_context_builder),
+):
+    """检索分层上下文
+
+    Args:
+        novel_id: 小说 ID
+        body: 检索请求体
+        builder: 上下文构建器
+
+    Returns:
+        ContextRetrieveResponse: 分层上下文和 token 使用情况
+    """
+    logger.debug("context retrieve novel_id=%s chapter=%s", novel_id, body.chapter_number)
+    try:
+        hint = None
+        if body.scene_director_result:
+            hint = SceneDirectorAnalysis.model_validate(body.scene_director_result)
+
+        payload = builder.build_structured_context(
+            novel_id=novel_id,
+            chapter_number=body.chapter_number,
+            outline=body.outline,
+            max_tokens=body.max_tokens,
+            scene_director=hint,
+        )
+        return ContextRetrieveResponse(
+            layer1={"content": payload["layer1_text"]},
+            layer2={"content": payload["layer2_text"]},
+            layer3={"content": payload["layer3_text"]},
+            token_usage=payload["token_usage"],
+        )
+    except Exception as e:
+        logger.exception("context retrieve failed for novel_id=%s", novel_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve context"
+        ) from e

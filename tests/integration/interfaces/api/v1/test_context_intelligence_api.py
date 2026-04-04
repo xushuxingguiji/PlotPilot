@@ -97,3 +97,85 @@ def test_scene_director_analyze_service_error_returns_generic_message():
         assert data["detail"] == "Failed to analyze scene"
         assert "database" not in data["detail"].lower()
         assert "connection" not in data["detail"].lower()
+
+
+def test_context_retrieve_returns_layers():
+    """Test that context/retrieve endpoint returns correct layered structure"""
+    client = TestClient(app)
+    r = client.post(
+        "/api/v1/novels/test-novel/context/retrieve",
+        json={"chapter_number": 1, "outline": "开场。", "max_tokens": 8000},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    # Verify layer structure
+    assert "layer1" in body
+    assert "layer2" in body
+    assert "layer3" in body
+    assert "token_usage" in body
+
+    # Verify each layer has content field
+    assert "content" in body["layer1"]
+    assert "content" in body["layer2"]
+    assert "content" in body["layer3"]
+
+    # Verify token_usage structure
+    assert "total" in body["token_usage"]
+    assert body["token_usage"]["total"] >= 0
+
+
+def test_context_retrieve_with_scene_director_hint():
+    """Test context/retrieve with optional scene_director_result"""
+    client = TestClient(app)
+    r = client.post(
+        "/api/v1/novels/test-novel/context/retrieve",
+        json={
+            "chapter_number": 1,
+            "outline": "主角进入房间。",
+            "scene_director_result": {
+                "characters": ["Alice"],
+                "locations": ["Room A"],
+                "action_types": ["enter"],
+                "trigger_keywords": ["door"],
+                "emotional_state": "curious",
+                "pov": "Alice"
+            },
+            "max_tokens": 8000
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "layer1" in body
+    assert "layer2" in body
+    assert "layer3" in body
+
+
+def test_context_retrieve_invalid_chapter_number():
+    """Test that invalid chapter_number is rejected"""
+    client = TestClient(app)
+    r = client.post(
+        "/api/v1/novels/test-novel/context/retrieve",
+        json={"chapter_number": 0, "outline": "Some outline"},
+    )
+    assert r.status_code == 422  # Validation error
+
+
+def test_context_retrieve_empty_outline():
+    """Test that empty outline is rejected"""
+    client = TestClient(app)
+    r = client.post(
+        "/api/v1/novels/test-novel/context/retrieve",
+        json={"chapter_number": 1, "outline": ""},
+    )
+    assert r.status_code == 422  # Validation error
+
+
+def test_context_retrieve_invalid_max_tokens():
+    """Test that invalid max_tokens is rejected"""
+    client = TestClient(app)
+    r = client.post(
+        "/api/v1/novels/test-novel/context/retrieve",
+        json={"chapter_number": 1, "outline": "outline", "max_tokens": 1000},
+    )
+    assert r.status_code == 422  # max_tokens must be >= 4096
