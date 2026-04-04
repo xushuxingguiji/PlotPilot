@@ -447,6 +447,53 @@ class ContextBuilder:
             except Exception as e:
                 logger.warning(f"Vector retrieval failed: {e}")
 
+        # TODO: 触发词与 Bible 切片联动（Phase 3 Task 5）
+        #
+        # 预期行为：
+        # 1. 检查 scene_director.trigger_keywords 是否非空
+        # 2. 使用 expand_triggers(scene_director.trigger_keywords) 扩展关键词
+        # 3. 从 bible_dto.world_settings 中匹配 name/description/setting_type 包含关键词的条目
+        # 4. 追加到 Layer2，受 token 预算约束
+        #
+        # 依赖缺失：
+        # - BibleService 当前无 search_settings_by_keywords() 方法
+        # - 需要实现简单的关键词匹配逻辑或扩展 BibleService API
+        #
+        # 实现方案（待选择）：
+        # A. 在此处实现简单的关键词匹配（遍历 world_settings，检查字段是否包含关键词）
+        # B. 扩展 BibleService 提供 search_settings_by_keywords() 方法
+        # C. 扩展 KnowledgeService 提供 search_triples_by_keywords() 方法
+        #
+        # 参考测试：tests/unit/application/services/test_trigger_keyword_bible_integration.py
+        # 当前状态：占位实现，测试标记为 @pytest.mark.skip
+        #
+        # if scene_director and scene_director.trigger_keywords:
+        #     from application.services.trigger_keyword_catalog import expand_triggers
+        #     expanded_keywords = expand_triggers(scene_director.trigger_keywords)
+        #
+        #     # 从 Bible world_settings 中匹配关键词
+        #     if bible_dto and bible_dto.world_settings:
+        #         matched_settings = []
+        #         for setting in bible_dto.world_settings:
+        #             # 检查 name, description, setting_type 是否包含任一关键词
+        #             if any(kw in setting.name or kw in setting.description or kw in setting.setting_type
+        #                    for kw in expanded_keywords):
+        #                 matched_settings.append(setting)
+        #
+        #         if matched_settings:
+        #             parts.append("\nTriggered Settings:")
+        #             running_tokens = self.estimate_tokens("\n".join(parts))
+        #
+        #             for setting in matched_settings:
+        #                 setting_info = f"- {setting.name} ({setting.setting_type}): {setting.description}"
+        #                 setting_tokens = self.estimate_tokens(setting_info)
+        #
+        #                 if running_tokens + setting_tokens > budget:
+        #                     break
+        #
+        #                 parts.append(setting_info)
+        #                 running_tokens += setting_tokens
+
         context = "\n".join(parts)
 
         # 截断到预算
