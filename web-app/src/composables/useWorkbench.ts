@@ -14,6 +14,18 @@ const PROGRESS_MAX_STEP = 6
 const STATS_DAYS = 30
 const POLLING_INTERVAL = 1000
 
+function formatApiErrorDetail(error: unknown): string {
+  const e = error as { response?: { data?: { detail?: unknown } }; message?: string }
+  const d = e?.response?.data?.detail
+  if (typeof d === 'string' && d.trim()) return d
+  if (Array.isArray(d)) {
+    const parts = d.map((x: { msg?: string }) => (typeof x?.msg === 'string' ? x.msg : JSON.stringify(x)))
+    return parts.join('; ') || ''
+  }
+  if (e?.message && typeof e.message === 'string') return e.message
+  return ''
+}
+
 // Type definitions
 export interface BookMeta {
   has_bible?: boolean
@@ -201,24 +213,53 @@ export function useWorkbench(options: UseWorkbenchOptions) {
     router.push('/')
   }
 
-  const goToChapter = async (id: number) => {
-    // Load chapter content inline instead of navigating
-    currentChapterId.value = id
+  /**
+   * 判断错误是否为 404（后端 EntityNotFoundError / HTTP 404）
+   */
+  function is404(error: unknown): boolean {
+    const e = error as { response?: { status?: number }; message?: string }
+    if (e?.response?.status === 404) return true
+    const detail = formatApiErrorDetail(error)
+    return /not\s*found|不存在/i.test(detail)
+  }
+
+  const goToChapter = async (id: number, nodeTitle?: string) => {
+    if (!Number.isFinite(id) || id < 1) {
+      message.error('无效的章节号')
+      return
+    }
+
     chapterLoading.value = true
     try {
-      const chapter = await chapterApi.getChapter(slug, id)
+      let chapter = await chapterApi.getChapter(slug, id).catch(async (err) => {
+        if (!is404(err)) throw err
+        // 章节正文不存在：静默创建空白记录（对应结构树手动添加的节点）
+        await chapterApi.ensureChapter(slug, id, nodeTitle ?? '')
+        return chapterApi.getChapter(slug, id)
+      })
+      currentChapterId.value = id
       chapterContent.value = chapter.content || ''
+      // 若刚刚是新建的空白章节，刷新侧栏章节列表
+      const existed = chapters.value.some((c) => c.number === id)
+      if (!existed) {
+        await loadDesk()
+      }
     } catch (error) {
-      message.error('加载章节失败')
+      const detail = formatApiErrorDetail(error)
+      currentChapterId.value = null
       chapterContent.value = ''
+      message.error(
+        detail
+          ? `加载第 ${id} 章失败：${detail}`
+          : `加载第 ${id} 章失败，请确认后端已启动。`
+      )
     } finally {
       chapterLoading.value = false
     }
   }
 
-  const handleChapterSelect = async (chapterId: number) => {
-    // Load chapter inline instead of routing
-    await goToChapter(chapterId)
+  const handleChapterSelect = async (chapterId: number, title = '') => {
+    await goToChapter(chapterId, title)
   }
 
   const handleUpdateSettings = async (_settings: Record<string, unknown>) => {

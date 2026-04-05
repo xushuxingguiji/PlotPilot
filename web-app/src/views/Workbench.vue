@@ -58,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, computed, ref, type ComponentPublicInstance } from 'vue'
+import { onMounted, computed, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useWorkbench } from '../composables/useWorkbench'
@@ -115,9 +115,24 @@ const currentChapter = computed(() => {
   return chapters.value.find(ch => ch.id === currentChapterId.value) || null
 })
 
+function parseChapterQuery(q: unknown): number | null {
+  if (q == null || q === '') return null
+  const raw = Array.isArray(q) ? q[0] : q
+  const n = Number(raw)
+  return !Number.isNaN(n) && n >= 1 ? n : null
+}
+
+async function syncChapterFromRoute() {
+  const n = parseChapterQuery(route.query.chapter)
+  if (n != null) {
+    await goToChapter(n)
+  }
+}
+
 onMounted(async () => {
   try {
     await loadDesk()
+    await syncChapterFromRoute()
   } catch {
     message.error('加载失败，请检查网络与后端是否已启动')
     bookTitle.value = slug
@@ -125,6 +140,13 @@ onMounted(async () => {
     pageLoading.value = false
   }
 })
+
+watch(
+  () => route.query.chapter,
+  () => {
+    void syncChapterFromRoute()
+  }
+)
 </script>
 
 <style scoped>

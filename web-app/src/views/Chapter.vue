@@ -267,7 +267,12 @@ const chapterId = computed(() => {
 })
 
 const goHome = () => {
-  router.push(`/book/${slug}/workbench`)
+  const n = chapterId.value
+  router.push(
+    n != null
+      ? { path: `/book/${slug}/workbench`, query: { chapter: String(n) } }
+      : `/book/${slug}/workbench`
+  )
 }
 
 watch(chapterId, (newId) => {
@@ -429,7 +434,12 @@ const runAiReview = async (save: boolean) => {
 }
 
 const goBack = () => {
-  router.push(`/book/${slug}/workbench`)
+  const n = chapterId.value
+  router.push(
+    n != null
+      ? { path: `/book/${slug}/workbench`, query: { chapter: String(n) } }
+      : `/book/${slug}/workbench`
+  )
 }
 
 const goCastGraph = () => {
