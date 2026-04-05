@@ -302,9 +302,22 @@ const chapterContent = ref('')
 const originalContent = ref('')
 const loading = computed(() => props.chapterLoading)
 const saving = ref(false)
-const generating = ref(false)
 const reviewing = ref(false)
 const reviewResult = ref<{ score: number; suggestions: string[] } | null>(null)
+
+// AbortController：点「停止」时真正取消后端 SSE 流
+const generateAbortCtrl = ref<AbortController | null>(null)
+const hostedAbortCtrl = ref<AbortController | null>(null)
+
+// 正在生成的章节 ID（null = 不在生成中）
+// 与 currentChapterId 解耦：用户可以切换章节，生成仍在后台继续
+const generatingChapterId = ref<number | null>(null)
+
+/** 当前视图是否正处于生成中（需要显示生成状态 UI） */
+const generating = computed(() =>
+  generatingChapterId.value !== null &&
+  generatingChapterId.value === props.currentChapterId
+)
 
 const currentChapter = computed(() => {
   if (!props.currentChapterId) return null
@@ -324,6 +337,14 @@ watch(() => props.chapterContent, (newContent) => {
   chapterContent.value = newContent
   originalContent.value = newContent
 }, { immediate: true })
+
+// 切换回正在生成的章节时，自动打开生成弹窗（让用户看到进度）
+watch(() => props.currentChapterId, (id) => {
+  if (id !== null && id === generatingChapterId.value) {
+    showGenerateModal.value = true
+  }
+  reviewResult.value = null
+})
 
 const handleContentChange = () => {
   // 内容变化
@@ -364,17 +385,23 @@ const handleGenerateChapter = async () => {
 const handleStartGenerate = async () => {
   if (!currentChapter.value) return
 
-  generating.value = true
+  const targetChapterId = currentChapter.value.id
+  const targetChapterNumber = currentChapter.value.number
+  generatingChapterId.value = targetChapterId
   generatedContent.value = ''
+
+  const ctrl = new AbortController()
+  generateAbortCtrl.value = ctrl
 
   try {
     await consumeGenerateChapterStream(
       props.slug,
       {
-        chapter_number: currentChapter.value.number,
-        outline: generateOutline.value || `第${currentChapter.value.number}章：承接前情，推进主线`
+        chapter_number: targetChapterNumber,
+        outline: generateOutline.value || `第${targetChapterNumber}章：承接前情，推进主线`
       },
       {
+        signal: ctrl.signal,
         onEvent: (event) => {
           if (event.type === 'phase') {
             generatedContent.value += `[阶段: ${event.phase}]\n`
@@ -382,21 +409,27 @@ const handleStartGenerate = async () => {
             generatedContent.value += event.text
           } else if (event.type === 'done') {
             generatedContent.value = event.content
-            message.success('章节生成完成')
+            // 若用户当前就在这一章，弹窗已在显示；若不在则发消息通知
+            if (props.currentChapterId === targetChapterId) {
+              message.success('章节生成完成')
+            } else {
+              message.success(`第 ${targetChapterNumber} 章生成完成，切回该章可查看`)
+            }
           } else if (event.type === 'error') {
             generatedContent.value += `\n\n[错误] ${event.message}\n`
-            message.error(`生成失败: ${event.message}`)
+            if (!ctrl.signal.aborted) message.error(`生成失败: ${event.message}`)
           }
         },
         onError: (err) => {
-          message.error(`生成失败: ${err}`)
+          if (!ctrl.signal.aborted) message.error(`生成失败: ${err}`)
         }
       }
     )
   } catch (error) {
-    message.error('生成失败')
+    if (!ctrl.signal.aborted) message.error('生成失败')
   } finally {
-    generating.value = false
+    generatingChapterId.value = null
+    generateAbortCtrl.value = null
   }
 }
 
@@ -419,7 +452,9 @@ const handleSaveGenerated = async () => {
 }
 
 const stopGenerate = () => {
-  generating.value = false
+  generateAbortCtrl.value?.abort()
+  generateAbortCtrl.value = null
+  generatingChapterId.value = null
   message.info('已停止生成')
 }
 
@@ -461,6 +496,8 @@ const setRightPanel = (panel: string) => {
 const handleStartHosted = async () => {
   hostedRunning.value = true
   hostedLog.value = ''
+  const ctrl = new AbortController()
+  hostedAbortCtrl.value = ctrl
 
   try {
     await consumeHostedWriteStream(
@@ -472,6 +509,7 @@ const handleStartHosted = async () => {
         auto_outline: hostedAutoOutline.value
       },
       {
+        signal: ctrl.signal,
         onEvent: (event) => {
           if (event.type === 'session') {
             hostedLog.value += `[会话开始] 章节 ${event.from_chapter}-${event.to_chapter}，共 ${event.total} 章\n\n`
@@ -481,8 +519,6 @@ const handleStartHosted = async () => {
             hostedLog.value += `[大纲] ${event.text}\n\n`
           } else if (event.type === 'phase') {
             hostedLog.value += `[阶段: ${event.phase}]\n`
-          } else if (event.type === 'chunk') {
-            // 不显示每个 chunk，避免日志过长
           } else if (event.type === 'done') {
             hostedLog.value += `[完成] 章节 ${event.chapter} 生成完成，${event.content?.length || 0} 字符\n`
           } else if (event.type === 'saved') {
@@ -497,23 +533,26 @@ const handleStartHosted = async () => {
             emit('chapterUpdated')
           } else if (event.type === 'error') {
             hostedLog.value += `\n[错误] ${event.message}\n`
-            message.error(`生成失败: ${event.message}`)
+            if (!ctrl.signal.aborted) message.error(`生成失败: ${event.message}`)
           }
         },
         onError: (err) => {
           hostedLog.value += `\n[连接错误] ${err}\n`
-          message.error(`托管连写失败: ${err}`)
+          if (!ctrl.signal.aborted) message.error(`托管连写失败: ${err}`)
         }
       }
     )
   } catch (error) {
-    message.error('托管连写失败')
+    if (!ctrl.signal.aborted) message.error('托管连写失败')
   } finally {
     hostedRunning.value = false
+    hostedAbortCtrl.value = null
   }
 }
 
 const stopHosted = () => {
+  hostedAbortCtrl.value?.abort()
+  hostedAbortCtrl.value = null
   hostedRunning.value = false
   message.info('已停止托管连写')
 }
