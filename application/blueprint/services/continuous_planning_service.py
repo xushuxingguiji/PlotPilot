@@ -231,13 +231,32 @@ class ContinuousPlanningService:
             act_node, bible_context, previous_summary, chapter_count
         )
 
-        response = await self.llm_service.generate(prompt, GenerationConfig(max_tokens=4096, temperature=0.7))
-        plan = self._parse_llm_response(response)
+        try:
+            response = await self.llm_service.generate(
+                prompt, GenerationConfig(max_tokens=4096, temperature=0.7)
+            )
+        except Exception as e:
+            logger.warning(f"幕级规划 LLM 调用失败 act={act_id}: {e}")
+            return {"success": False, "act_id": act_id, "chapters": [], "error": str(e)}
+
+        try:
+            plan = self._parse_llm_response(response)
+        except Exception as e:
+            logger.warning(f"幕级规划 JSON 解析失败 act={act_id}: {e}")
+            return {"success": False, "act_id": act_id, "chapters": [], "parse_error": str(e)}
+
+        if not isinstance(plan, dict):
+            logger.warning(f"幕级规划解析结果非对象 act={act_id}: {type(plan)}")
+            return {"success": False, "act_id": act_id, "chapters": []}
+
+        chapters = plan.get("chapters", [])
+        if not isinstance(chapters, list):
+            chapters = []
 
         return {
             "success": True,
             "act_id": act_id,
-            "chapters": plan.get("chapters", [])
+            "chapters": chapters,
         }
 
     async def _remove_chapter_children_of_act(self, act_id: str) -> None:
