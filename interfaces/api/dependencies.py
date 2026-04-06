@@ -214,7 +214,7 @@ def get_chapter_service() -> ChapterService:
 
 @lru_cache
 def get_background_task_service():
-    """单例后台任务队列（API 进程内）：文风；章末 bundle（叙事+三元组+伏笔+故事线+张力+对话）与管线同源单次 LLM。"""
+    """单例后台任务队列（API 进程内）：文风；章末 bundle（叙事+三元组+伏笔+故事线+张力+对话+剧情点）与管线同源单次 LLM。"""
     from application.engine.services.background_task_service import BackgroundTaskService
     from infrastructure.persistence.database.triple_repository import TripleRepository
     from infrastructure.persistence.database.sqlite_storyline_repository import SqliteStorylineRepository
@@ -229,11 +229,12 @@ def get_background_task_service():
         chapter_indexing_service=get_chapter_indexing_service(),
         storyline_repository=SqliteStorylineRepository(get_database()),
         chapter_repository=get_chapter_repository(),
+        plot_arc_repository=get_plot_arc_repository(),
     )
 
 
 def get_chapter_aftermath_pipeline():
-    """章节保存后统一管线：叙事/向量、文风、KG 推断；三元组与伏笔、故事线、张力、对话在叙事同步中一次 LLM 落库。"""
+    """章节保存后统一管线：叙事/向量、文风、KG 推断；三元组与伏笔、故事线、张力、对话、剧情点在叙事同步中一次 LLM 落库。"""
     from application.engine.services.chapter_aftermath_pipeline import ChapterAftermathPipeline
     from infrastructure.persistence.database.triple_repository import TripleRepository
     from infrastructure.persistence.database.sqlite_storyline_repository import SqliteStorylineRepository
@@ -248,6 +249,7 @@ def get_chapter_aftermath_pipeline():
         foreshadowing_repository=get_foreshadowing_repository(),
         storyline_repository=SqliteStorylineRepository(get_database()),
         chapter_repository=get_chapter_repository(),
+        plot_arc_repository=get_plot_arc_repository(),
     )
 
 

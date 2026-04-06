@@ -21,6 +21,7 @@ from infrastructure.persistence.database.story_node_repository import StoryNodeR
 from infrastructure.persistence.database.chapter_element_repository import ChapterElementRepository
 from infrastructure.persistence.database.sqlite_foreshadowing_repository import SqliteForeshadowingRepository
 from infrastructure.persistence.database.sqlite_storyline_repository import SqliteStorylineRepository
+from infrastructure.persistence.database.sqlite_plot_arc_repository import SqlitePlotArcRepository
 
 from application.engine.services.autopilot_daemon import AutopilotDaemon
 from application.engine.services.background_task_service import BackgroundTaskService
@@ -100,6 +101,7 @@ def build_daemon() -> AutopilotDaemon:
         chapter_indexing_service=get_chapter_indexing_service(),
         storyline_repository=SqliteStorylineRepository(get_database()),
         chapter_repository=get_chapter_repository(),
+        plot_arc_repository=SqlitePlotArcRepository(get_database()),
     )
 
     aftermath_pipeline = None
@@ -113,8 +115,9 @@ def build_daemon() -> AutopilotDaemon:
             foreshadowing_repository=foreshadow_repo,
             storyline_repository=SqliteStorylineRepository(get_database()),
             chapter_repository=get_chapter_repository(),
+            plot_arc_repository=SqlitePlotArcRepository(get_database()),
         )
-        logger.info("ChapterAftermathPipeline 已注入（叙事/向量/文风/KG；三元组与伏笔、故事线、张力、对话单次 LLM）")
+        logger.info("ChapterAftermathPipeline 已注入（叙事/向量/文风/KG；三元组与伏笔、故事线、张力、对话、剧情点单次 LLM）")
     except Exception as e:
         logger.warning("ChapterAftermathPipeline 初始化失败，审计将降级：%s", e)
 

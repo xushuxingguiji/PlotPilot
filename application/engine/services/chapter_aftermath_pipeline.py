@@ -64,6 +64,7 @@ class ChapterAftermathPipeline:
         foreshadowing_repository: Any = None,
         storyline_repository: Any = None,
         chapter_repository: Any = None,
+        plot_arc_repository: Any = None,
     ) -> None:
         self._knowledge = knowledge_service
         self._indexing = chapter_indexing_service
@@ -73,6 +74,7 @@ class ChapterAftermathPipeline:
         self._foreshadowing_repository = foreshadowing_repository
         self._storyline_repository = storyline_repository
         self._chapter_repository = chapter_repository
+        self._plot_arc_repository = plot_arc_repository
 
     async def run_after_chapter_saved(
         self,
@@ -111,6 +113,7 @@ class ChapterAftermathPipeline:
                 foreshadowing_repo=self._foreshadowing_repository,
                 storyline_repository=self._storyline_repository,
                 chapter_repository=self._chapter_repository,
+                plot_arc_repository=self._plot_arc_repository,
             )
             out["narrative_sync_ok"] = True
         except Exception as e:
