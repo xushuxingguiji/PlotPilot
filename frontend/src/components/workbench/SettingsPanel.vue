@@ -1,10 +1,11 @@
 <template>
   <div class="right-panel">
-    <!-- 一级分组切换 -->
+    <!-- 一级：剧本基建 / 叙事脉络 / 片场 — 监控在中栏「监控大盘」 -->
     <div class="group-bar">
       <n-radio-group v-model:value="activeGroup" size="small" class="group-switch">
-        <n-radio-button value="settings">创作设定</n-radio-button>
-        <n-radio-button value="tools">辅助工具</n-radio-button>
+        <n-radio-button value="foundation">剧本基建</n-radio-button>
+        <n-radio-button value="narrative">叙事脉络</n-radio-button>
+        <n-radio-button value="tactical">片场</n-radio-button>
       </n-radio-group>
       <n-text v-if="currentChapter" depth="3" style="font-size:11px;flex-shrink:0">
         第{{ currentChapter.number }}章
@@ -14,10 +15,10 @@
       </n-text>
     </div>
 
-    <!-- 创作设定：世界观 / 作品设定 / 知识库 / 故事线 / 情节弧线 / 时间线 / 伏笔 -->
+    <!-- 剧本基建：作品设定 / 世界观 / 知识库 -->
     <n-tabs
-      v-if="activeGroup === 'settings'"
-      v-model:value="settingsTab"
+      v-if="activeGroup === 'foundation'"
+      v-model:value="foundationTab"
       type="line"
       size="small"
       class="settings-tabs"
@@ -32,6 +33,17 @@
       <n-tab-pane name="knowledge" tab="知识库">
         <KnowledgePanel :slug="slug" />
       </n-tab-pane>
+    </n-tabs>
+
+    <!-- 叙事脉络：故事线 / 情节弧 / 时间线 / 重构扫描 -->
+    <n-tabs
+      v-if="activeGroup === 'narrative'"
+      v-model:value="narrativeTab"
+      type="line"
+      size="small"
+      class="settings-tabs"
+      :tabs-padding="8"
+    >
       <n-tab-pane name="storylines" tab="故事线">
         <StorylinePanel :slug="slug" />
       </n-tab-pane>
@@ -41,34 +53,25 @@
       <n-tab-pane name="timeline" tab="时间线">
         <TimelinePanel :slug="slug" />
       </n-tab-pane>
-      <n-tab-pane name="foreshadow" tab="伏笔">
-        <ForeshadowLedgerPanel :slug="slug" />
+      <n-tab-pane name="macro-refactor" tab="重构扫描">
+        <MacroRefactorPanel :slug="slug" />
       </n-tab-pane>
     </n-tabs>
 
-    <!-- 辅助工具：章节元素 / 对话沙盒 / 重构扫描 / 文风漂移 -->
+    <!-- 片场：绑定当前选中章 -->
     <n-tabs
-      v-if="activeGroup === 'tools'"
-      v-model:value="toolsTab"
+      v-if="activeGroup === 'tactical'"
+      v-model:value="tacticalTab"
       type="line"
       size="small"
       class="settings-tabs"
       :tabs-padding="8"
     >
-      <n-tab-pane name="chapter-elements" tab="章节元素">
-        <ChapterElementPanel
-          :slug="slug"
-          :current-chapter-number="currentChapter?.number ?? null"
-        />
-      </n-tab-pane>
       <n-tab-pane name="sandbox" tab="对话沙盒">
         <SandboxDialoguePanel :slug="slug" />
       </n-tab-pane>
-      <n-tab-pane name="voice-drift" tab="文风漂移">
-        <VoiceDriftPanel :slug="slug" />
-      </n-tab-pane>
-      <n-tab-pane name="macro-refactor" tab="重构扫描">
-        <MacroRefactorPanel :slug="slug" />
+      <n-tab-pane name="foreshadow" tab="伏笔">
+        <ForeshadowLedgerPanel :slug="slug" />
       </n-tab-pane>
     </n-tabs>
   </div>
@@ -84,12 +87,21 @@ import PlotArcPanel from './PlotArcPanel.vue'
 import TimelinePanel from './TimelinePanel.vue'
 import ForeshadowLedgerPanel from './ForeshadowLedgerPanel.vue'
 import MacroRefactorPanel from './MacroRefactorPanel.vue'
-import ChapterElementPanel from './ChapterElementPanel.vue'
 import SandboxDialoguePanel from './SandboxDialoguePanel.vue'
-import VoiceDriftPanel from './VoiceDriftPanel.vue'
 
-const SETTINGS_TABS = new Set(['bible', 'worldbuilding', 'knowledge', 'storylines', 'plot-arc', 'timeline', 'foreshadow'])
-const TOOLS_TABS = new Set(['chapter-elements', 'sandbox', 'voice-drift', 'macro-refactor'])
+/** 剧本基建组 */
+const FOUNDATION_TABS = new Set(['bible', 'worldbuilding', 'knowledge'])
+/** 叙事脉络组 */
+const NARRATIVE_TABS = new Set(['storylines', 'plot-arc', 'timeline', 'macro-refactor'])
+/** 片场（章节元素已移至中栏 Tab） */
+const TACTICAL_TABS = new Set(['sandbox', 'foreshadow'])
+
+function resolveGroup(panel: string | undefined): 'foundation' | 'narrative' | 'tactical' {
+  if (!panel) return 'foundation'
+  if (TACTICAL_TABS.has(panel)) return 'tactical'
+  if (NARRATIVE_TABS.has(panel)) return 'narrative'
+  return 'foundation'
+}
 
 interface Chapter {
   id: number
@@ -111,20 +123,32 @@ const props = withDefaults(defineProps<Props>(), {
   currentChapter: null,
 })
 
-const activeGroup = ref<'settings' | 'tools'>(
-  TOOLS_TABS.has(props.currentPanel ?? '') ? 'tools' : 'settings'
+const activeGroup = ref<'foundation' | 'narrative' | 'tactical'>(resolveGroup(props.currentPanel))
+
+const foundationTab = ref(
+  FOUNDATION_TABS.has(props.currentPanel ?? '') ? props.currentPanel! : 'bible'
 )
-const settingsTab = ref(SETTINGS_TABS.has(props.currentPanel ?? '') ? props.currentPanel! : 'bible')
-const toolsTab = ref(TOOLS_TABS.has(props.currentPanel ?? '') ? props.currentPanel! : 'chapter-elements')
+const narrativeTab = ref(
+  NARRATIVE_TABS.has(props.currentPanel ?? '') ? props.currentPanel! : 'storylines'
+)
+const tacticalTab = ref(
+  TACTICAL_TABS.has(props.currentPanel ?? '') ? props.currentPanel! : 'sandbox'
+)
 
 watch(() => props.currentPanel, (newVal) => {
   if (!newVal) return
-  if (TOOLS_TABS.has(newVal)) {
-    activeGroup.value = 'tools'
-    toolsTab.value = newVal
+  if (TACTICAL_TABS.has(newVal)) {
+    activeGroup.value = 'tactical'
+    tacticalTab.value = newVal
+  } else if (NARRATIVE_TABS.has(newVal)) {
+    activeGroup.value = 'narrative'
+    narrativeTab.value = newVal
+  } else if (FOUNDATION_TABS.has(newVal)) {
+    activeGroup.value = 'foundation'
+    foundationTab.value = newVal
   } else {
-    activeGroup.value = 'settings'
-    settingsTab.value = newVal
+    activeGroup.value = 'foundation'
+    foundationTab.value = 'bible'
   }
 })
 </script>
@@ -153,6 +177,7 @@ watch(() => props.currentPanel, (newVal) => {
 
 .group-switch {
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .settings-tabs {
