@@ -8,8 +8,11 @@ from domain.bible.entities.location import Location
 from domain.bible.entities.timeline_note import TimelineNote
 from domain.bible.entities.style_note import StyleNote
 from domain.bible.value_objects.character_id import CharacterId
+from domain.novel.entities.novel import Novel, NovelStage
 from domain.novel.value_objects.novel_id import NovelId
 from domain.bible.repositories.bible_repository import BibleRepository
+from domain.novel.repositories.novel_repository import NovelRepository
+from domain.novel.repositories.chapter_repository import ChapterRepository
 from domain.shared.exceptions import EntityNotFoundError
 from application.world.dtos.bible_dto import BibleDTO, CharacterDTO
 
@@ -23,6 +26,8 @@ class BibleService:
     def __init__(
         self,
         bible_repository: BibleRepository,
+        novel_repository: Optional[NovelRepository] = None,
+        chapter_repository: Optional[ChapterRepository] = None,
         location_triple_sync: Optional["BibleLocationTripleSyncService"] = None,
     ):
         """初始化服务
@@ -32,6 +37,8 @@ class BibleService:
             location_triple_sync: 可选；保存 Bible 后将 locations 同步到 triples
         """
         self.bible_repository = bible_repository
+        self._novel_repository = novel_repository
+        self._chapter_repository = chapter_repository
         self._location_triple_sync = location_triple_sync
 
     def _validate_locations_forest(self, locations: list) -> None:
@@ -64,6 +71,28 @@ class BibleService:
         Returns:
             BibleDTO
         """
+        # 兼容：部分入口可能先写 chapters/story_nodes，但 novels 主表尚未创建，导致 Bible 外键失败。
+        # 这里兜底确保 novels(id) 存在，避免 500。
+        if self._novel_repository is not None:
+            existing = self._novel_repository.get_by_id(NovelId(novel_id))
+            if existing is None:
+                target = 30
+                if self._chapter_repository is not None:
+                    try:
+                        n = len(self._chapter_repository.list_by_novel(NovelId(novel_id)))
+                        target = max(target, n or 0)
+                    except Exception:
+                        pass
+                placeholder = Novel(
+                    id=NovelId(novel_id),
+                    title=novel_id,
+                    author="未知作者",
+                    target_chapters=target,
+                    premise="",
+                    stage=NovelStage.PLANNING,
+                )
+                self._novel_repository.save(placeholder)
+
         bible = Bible(id=bible_id, novel_id=NovelId(novel_id))
         self.bible_repository.save(bible)
         return BibleDTO.from_domain(bible)
